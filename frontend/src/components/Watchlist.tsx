@@ -160,7 +160,7 @@ function UserRow({ symbol, onRemove, onChart }: {
 
 // ── Shared table shell ────────────────────────────────────────────────────────
 function WatchTable({ children, empty }: {
-  children: React.ReactNode; empty?: boolean;
+  children?: React.ReactNode; empty?: boolean;
 }) {
   if (empty) return (
     <div style={{ padding: "40px 16px", textAlign: "center" }}>
