@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+/* ── Custom theme tokens (Tailwind v4 syntax) ── */
+@theme {
+  --color-surface:          #0f1117;
+  --color-surface-card:     #1a1d27;
+  --color-surface-elevated: #232733;
+  --color-surface-border:   #2a2e3a;
+  --color-profit:           #22c55e;
+  --color-loss:             #ef4444;
+  --color-accent:           #3b82f6;
+  --color-muted:            #6b7280;
+  --font-family-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+}
+
+/* ── Base styles ── */
+body {
+  background-color: var(--color-surface);
+  color: #f3f4f6;
+  font-family: var(--font-family-mono);
+}
+
+/* ── Price tick flash animations ── */
+@keyframes flashGreen {
+  0%   { background-color: rgba(34, 197, 94, 0.25); }
+  100% { background-color: transparent; }
+}
+@keyframes flashRed {
+  0%   { background-color: rgba(239, 68, 68, 0.25); }
+  100% { background-color: transparent; }
+}
+.flash-green { animation: flashGreen 0.6s ease-out; }
+.flash-red   { animation: flashRed   0.6s ease-out; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0f1117; }
+::-webkit-scrollbar-thumb { background: #2a2e3a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
