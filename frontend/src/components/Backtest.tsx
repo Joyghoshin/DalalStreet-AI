@@ -369,7 +369,7 @@ export default function Backtest() {
                         background: "#111827", border: "1px solid #374151",
                         borderRadius: 6, fontSize: 11, fontFamily: "monospace",
                       }}
-                      formatter={(v: number) => [`₹${v.toLocaleString("en-IN")}`, "Equity"]}
+                      formatter={(v) => [`₹${(v as number)?.toLocaleString("en-IN") ?? ""}`, "Equity"]}
                       labelStyle={{ color: "#9ca3af" }}
                     />
                     <ReferenceLine y={100000} stroke="#374151" strokeDasharray="4 4" />
