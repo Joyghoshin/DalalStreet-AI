@@ -113,7 +113,7 @@ def _gbm(symbol: str, exchange: str) -> dict:
 
 
 NSE_OVERRIDES = {
-    "TATAMOTORS": "500570.BO",
+    "TATAMOTORS": "TATAMOTORS.NS",
     "BHARTIARTL": "BHARTIARTL.NS",
     "KOTAKBANK":  "KOTAKBANK.NS",
     "HDFCBANK":   "HDFCBANK.NS",
