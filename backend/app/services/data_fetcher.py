@@ -99,6 +99,13 @@ NSE_OVERRIDES = {
 }
 
 
+BSE_FALLBACKS = {
+    "TATAMOTORS": "500570.BO",
+    "LTIM":       "540005.BO",
+    "ADANIENT":   "512599.BO",
+    "BAJAJHFL":   "508246.BO",
+}
+
 def _resolve_ticker(symbol: str, exchange: str) -> str:
     return NSE_OVERRIDES.get(
         symbol, f"{symbol}{'.NS' if exchange == 'NSE' else '.BO'}"
