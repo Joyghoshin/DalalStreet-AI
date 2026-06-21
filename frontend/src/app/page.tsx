@@ -9,6 +9,7 @@ import AIChat       from "@/components/AIChat";
 import AlgoTrading  from "@/components/AlgoTrading";
 import Backtest     from "@/components/Backtest";
 import Learn        from "@/components/Learn";
+import LogoutButton from "@/components/LogoutButton";
 
 const DEFAULT_SYMBOLS = [
   "RELIANCE","TCS","INFY","HDFCBANK","ITC",
@@ -53,8 +54,11 @@ export default function Dashboard() {
             border: "1px solid var(--color-surface-border)",
           }}>DEMO · Virtual Trading</span>
         </div>
-        <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "monospace" }}>
-          Powered by Groq · yfinance · NSE/BSE
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "monospace" }}>
+            Powered by Groq · yfinance · NSE/BSE
+          </div>
+          <LogoutButton />
         </div>
       </header>
 
@@ -75,14 +79,9 @@ export default function Dashboard() {
         alignItems: "start",
         minHeight: "calc(100vh - 100px)",
       }}>
-
-        {/* Left — Watchlist */}
         <Watchlist />
 
-        {/* Right — Tabbed panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
-          {/* Tab switcher */}
           <div style={{
             display: "flex", gap: 4, flexWrap: "wrap",
             background: "var(--color-surface-card)",
@@ -97,7 +96,6 @@ export default function Dashboard() {
             <button style={tabStyle("portfolio")} onClick={() => setActiveTab("portfolio")}>💼 Portfolio</button>
           </div>
 
-          {/* Tab content */}
           {activeTab === "chat"      && <AIChat />}
           {activeTab === "trade"     && <TradePanel onTrade={() => setRefreshKey(k => k + 1)} />}
           {activeTab === "algo"      && <AlgoTrading />}

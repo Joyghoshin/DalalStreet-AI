@@ -1,8 +1,9 @@
 """
-app/routers/chart.py
+app/routers/chart_router.py
 OHLC history endpoint for stock charts.
 """
 import yfinance as yf
+import time
 from fastapi import APIRouter, HTTPException, Query
 from app.services.data_fetcher import NSE_OVERRIDES, BSE_FALLBACKS
 
@@ -17,10 +18,20 @@ PERIOD_MAP = {
     "3y":  ("3y",  "1wk"),
 }
 
-def _ticker_sym(symbol: str) -> str:
+def _ticker_sym(symbol: str) -> list[str]:
+    candidates = []
     if symbol in NSE_OVERRIDES:
-        return NSE_OVERRIDES[symbol]
-    return f"{symbol}.NS"
+        candidates.append(NSE_OVERRIDES[symbol])
+    else:
+        candidates.append(f"{symbol}.NS")
+    if symbol in BSE_FALLBACKS:
+        candidates.append(BSE_FALLBACKS[symbol])
+    # Always add generic alternates
+    if f"{symbol}.NS" not in candidates:
+        candidates.append(f"{symbol}.NS")
+    if f"{symbol}.BO" not in candidates:
+        candidates.append(f"{symbol}.BO")
+    return candidates
 
 @router.get("/ohlc/{symbol}")
 def get_ohlc(
@@ -32,22 +43,29 @@ def get_ohlc(
         period = "3y"
 
     yf_period, interval = PERIOD_MAP[period]
-    candidates = [_ticker_sym(symbol)]
-    if symbol in BSE_FALLBACKS:
-        candidates.append(BSE_FALLBACKS[symbol])
+    candidates = _ticker_sym(symbol)
 
     df = None
     for t in candidates:
-        try:
-            raw = yf.download(
-                t, period=yf_period, interval=interval,
-                auto_adjust=True, progress=False
-            )
-            if not raw.empty:
-                df = raw
-                break
-        except Exception:
-            continue
+        for attempt in range(3):
+            try:
+                time.sleep(0.5 * (attempt + 1))  # backoff
+                ticker = yf.Ticker(t)
+                # Use history() instead of download() — different endpoint, less rate limited
+                raw = ticker.history(
+                    period=yf_period,
+                    interval=interval,
+                    auto_adjust=True,
+                )
+                if not raw.empty:
+                    df = raw
+                    break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[chart] {t}: {e}")
+                continue
+        if df is not None:
+            break
 
     if df is None or df.empty:
         raise HTTPException(404, f"No chart data for {symbol}")
@@ -60,12 +78,12 @@ def get_ohlc(
     for ts, row in df.iterrows():
         try:
             candles.append({
-                "date":   str(ts)[:16],   # "2024-01-15 09:15"
+                "date":   str(ts)[:16],
                 "open":   round(float(row["Open"]),  2),
                 "high":   round(float(row["High"]),  2),
                 "low":    round(float(row["Low"]),   2),
                 "close":  round(float(row["Close"]), 2),
-                "volume": int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
+                "volume": int(row["Volume"]) if str(row["Volume"]) != "nan" else 0,
             })
         except Exception:
             continue

@@ -5,8 +5,7 @@ from datetime import datetime, timezone, timedelta
 _cache: dict = {}
 _last_gbm: dict = {}
 
-# Longer TTL to minimize Yahoo API calls on cloud
-CACHE_TTL_OPEN   = 60   # 1 min
+CACHE_TTL_OPEN   = 60   # 1 min — reduce Yahoo API calls
 CACHE_TTL_CLOSED = 900  # 15 min
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -19,30 +18,57 @@ def _is_market_open() -> bool:
 
 
 def _fetch_fast_info(ticker_sym: str) -> tuple[float, float, float, float, float, int]:
-    """
-    Uses ONLY fast_info — single HTTP request, avoids rate limits.
-    Returns (price, prev_close, open, high, low, volume)
-    Never calls yf.download() which triggers rate limits.
-    """
-    time.sleep(0.3)  # small delay between requests
+    """Single lightweight request via fast_info — avoids rate limits."""
+    time.sleep(0.5)
     ticker = yf.Ticker(ticker_sym)
     fi     = ticker.fast_info
 
-    price = float(fi.last_price      or 0)
-    prev  = float(fi.previous_close  or 0)
-    open_ = float(fi.open            or prev)
-    high  = float(fi.day_high        or price)
-    low   = float(fi.day_low         or price)
+    price = float(fi.last_price     or 0)
+    prev  = float(fi.previous_close or 0)
+    open_ = float(fi.open           or prev)
+    high  = float(fi.day_high       or price)
+    low   = float(fi.day_low        or price)
     vol   = int(fi.three_month_average_volume or 0)
 
     if price <= 0 or prev <= 0:
-        raise ValueError(f"Invalid price from fast_info: price={price} prev={prev}")
+        raise ValueError(f"Invalid price: price={price} prev={prev}")
 
     return (
         round(price, 2), round(prev, 2),
         round(open_, 2), round(high, 2),
         round(low, 2),   vol,
     )
+
+
+def _fetch_index_fast_info(ticker_sym: str) -> tuple[float, float]:
+    """Fetch index using fast_info with history fallback."""
+    time.sleep(0.5)
+    ticker = yf.Ticker(ticker_sym)
+
+    # Try fast_info first
+    try:
+        fi    = ticker.fast_info
+        price = float(fi.last_price     or 0)
+        prev  = float(fi.previous_close or 0)
+        if price > 100 and prev > 100:
+            return round(price, 2), round(prev, 2)
+    except Exception:
+        pass
+
+    # Fallback: ticker.history() — different endpoint than yf.download()
+    for attempt in range(3):
+        try:
+            time.sleep(1 * (attempt + 1))
+            hist = ticker.history(period="5d", auto_adjust=True)
+            if not hist.empty:
+                price = round(float(hist["Close"].iloc[-1]), 2)
+                prev  = round(float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price, 2)
+                if price > 100:
+                    return price, prev
+        except Exception:
+            continue
+
+    raise ValueError(f"Could not fetch index: {ticker_sym}")
 
 
 def _gbm(symbol: str, exchange: str) -> dict:
@@ -98,13 +124,13 @@ NSE_OVERRIDES = {
     "COALINDIA":  "COALINDIA.NS",
 }
 
-
 BSE_FALLBACKS = {
     "TATAMOTORS": "500570.BO",
     "LTIM":       "540005.BO",
     "ADANIENT":   "512599.BO",
     "BAJAJHFL":   "508246.BO",
 }
+
 
 def _resolve_ticker(symbol: str, exchange: str) -> str:
     return NSE_OVERRIDES.get(
@@ -142,7 +168,6 @@ def get_live_price(symbol: str, exchange: str = "NSE") -> dict:
 
     except Exception as e:
         print(f"[price] {ticker_sym}: {e} — GBM fallback")
-        # Return last cached value if available
         if symbol in _cache:
             return {k: v for k, v in _cache[symbol].items() if k != "_ts"}
         return _gbm(symbol, exchange)
@@ -152,18 +177,10 @@ def get_index(symbol: str) -> dict:
     ttl    = CACHE_TTL_OPEN if _is_market_open() else CACHE_TTL_CLOSED
     cached = _cache.get(f"_idx_{symbol}")
     if cached and (time.time() - cached["_ts"]) < ttl:
-        return {k: v for k, v in cached.items() if k != "_ts"}
+        return {k: v for k, v in _cache[f"_idx_{symbol}"].items() if k != "_ts"}
 
     try:
-        time.sleep(0.3)
-        ticker = yf.Ticker(symbol)
-        fi     = ticker.fast_info
-        price  = round(float(fi.last_price     or 0), 2)
-        prev   = round(float(fi.previous_close or 0), 2)
-
-        if price <= 0:
-            raise ValueError(f"Invalid index price: {price}")
-
+        price, prev = _fetch_index_fast_info(symbol)
         chg = round(price - prev, 2)
         result = {
             "symbol":    symbol,
