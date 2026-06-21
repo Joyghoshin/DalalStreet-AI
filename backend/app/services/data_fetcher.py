@@ -5,8 +5,8 @@ from datetime import datetime, timezone, timedelta
 _cache: dict = {}
 _last_gbm: dict = {}
 
-CACHE_TTL_OPEN   = 60   # 1 min — reduce Yahoo API calls
-CACHE_TTL_CLOSED = 900  # 15 min
+CACHE_TTL_OPEN   = 60    # 1 min during market hours
+CACHE_TTL_CLOSED = 1800  # 30 min when closed — drastically reduces requests
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -17,58 +17,111 @@ def _is_market_open() -> bool:
     return now.weekday() < 5 and (9 * 60 + 15) <= mins < (15 * 60 + 30)
 
 
-def _fetch_fast_info(ticker_sym: str) -> tuple[float, float, float, float, float, int]:
-    """Single lightweight request via fast_info — avoids rate limits."""
-    time.sleep(0.5)
-    ticker = yf.Ticker(ticker_sym)
-    fi     = ticker.fast_info
-
-    price = float(fi.last_price     or 0)
-    prev  = float(fi.previous_close or 0)
-    open_ = float(fi.open           or prev)
-    high  = float(fi.day_high       or price)
-    low   = float(fi.day_low        or price)
-    vol   = int(fi.three_month_average_volume or 0)
-
-    if price <= 0 or prev <= 0:
-        raise ValueError(f"Invalid price: price={price} prev={prev}")
-
-    return (
-        round(price, 2), round(prev, 2),
-        round(open_, 2), round(high, 2),
-        round(low, 2),   vol,
-    )
+def _safe_float(val, default=0.0) -> float:
+    try:
+        v = float(val)
+        return v if v == v else default  # NaN check
+    except Exception:
+        return default
 
 
-def _fetch_index_fast_info(ticker_sym: str) -> tuple[float, float]:
-    """Fetch index using fast_info with history fallback."""
+def _fetch_ticker_price(ticker_sym: str) -> tuple[float, float, float, float, float, int]:
+    """
+    Tries multiple yfinance endpoints in order:
+    1. fast_info (fastest, single request)
+    2. .info['regularMarketPrice'] (different endpoint)
+    3. .history(period='2d') (last resort)
+    """
     time.sleep(0.5)
     ticker = yf.Ticker(ticker_sym)
 
-    # Try fast_info first
+    # Method 1: fast_info
     try:
         fi    = ticker.fast_info
-        price = float(fi.last_price     or 0)
-        prev  = float(fi.previous_close or 0)
-        if price > 100 and prev > 100:
+        price = _safe_float(fi.last_price)
+        prev  = _safe_float(fi.previous_close)
+        if price > 0.5 and prev > 0.5:
+            open_ = _safe_float(fi.open, prev)
+            high  = _safe_float(fi.day_high, price)
+            low   = _safe_float(fi.day_low, price)
+            vol   = int(_safe_float(fi.three_month_average_volume))
+            return round(price,2), round(prev,2), round(open_,2), round(high,2), round(low,2), vol
+    except Exception:
+        pass
+
+    # Method 2: .info dict (different Yahoo endpoint)
+    time.sleep(1)
+    try:
+        info  = ticker.info
+        price = _safe_float(info.get("regularMarketPrice") or info.get("currentPrice"))
+        prev  = _safe_float(info.get("previousClose") or info.get("regularMarketPreviousClose"))
+        if price > 0.5 and prev > 0.5:
+            open_ = _safe_float(info.get("regularMarketOpen", prev))
+            high  = _safe_float(info.get("dayHigh", price))
+            low   = _safe_float(info.get("dayLow", price))
+            vol   = int(_safe_float(info.get("volume") or info.get("averageVolume", 0)))
+            return round(price,2), round(prev,2), round(open_,2), round(high,2), round(low,2), vol
+    except Exception:
+        pass
+
+    # Method 3: history (last resort)
+    time.sleep(2)
+    try:
+        hist = ticker.history(period="5d", auto_adjust=True)
+        if not hist.empty:
+            price = round(float(hist["Close"].iloc[-1]), 2)
+            prev  = round(float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price, 2)
+            high  = round(float(hist["High"].iloc[-1]), 2)
+            low   = round(float(hist["Low"].iloc[-1]), 2)
+            open_ = round(float(hist["Open"].iloc[-1]), 2)
+            vol   = int(float(hist["Volume"].iloc[-1]))
+            if price > 0.5:
+                return price, prev, open_, high, low, vol
+    except Exception:
+        pass
+
+    raise ValueError(f"All methods failed for {ticker_sym}")
+
+
+def _fetch_index_price(ticker_sym: str) -> tuple[float, float]:
+    """Fetch index with 3 fallback methods."""
+    time.sleep(0.5)
+    ticker = yf.Ticker(ticker_sym)
+
+    # Method 1: fast_info
+    try:
+        fi    = ticker.fast_info
+        price = _safe_float(fi.last_price)
+        prev  = _safe_float(fi.previous_close)
+        if price > 1000:
             return round(price, 2), round(prev, 2)
     except Exception:
         pass
 
-    # Fallback: ticker.history() — different endpoint than yf.download()
-    for attempt in range(3):
-        try:
-            time.sleep(1 * (attempt + 1))
-            hist = ticker.history(period="5d", auto_adjust=True)
-            if not hist.empty:
-                price = round(float(hist["Close"].iloc[-1]), 2)
-                prev  = round(float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price, 2)
-                if price > 100:
-                    return price, prev
-        except Exception:
-            continue
+    # Method 2: .info
+    time.sleep(1)
+    try:
+        info  = ticker.info
+        price = _safe_float(info.get("regularMarketPrice") or info.get("previousClose"))
+        prev  = _safe_float(info.get("previousClose") or info.get("regularMarketPreviousClose"))
+        if price > 1000:
+            return round(price, 2), round(prev, 2)
+    except Exception:
+        pass
 
-    raise ValueError(f"Could not fetch index: {ticker_sym}")
+    # Method 3: history
+    time.sleep(2)
+    try:
+        hist = ticker.history(period="5d", auto_adjust=True)
+        if not hist.empty:
+            price = round(float(hist["Close"].iloc[-1]), 2)
+            prev  = round(float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price, 2)
+            if price > 1000:
+                return price, prev
+    except Exception:
+        pass
+
+    raise ValueError(f"Index fetch failed: {ticker_sym}")
 
 
 def _gbm(symbol: str, exchange: str) -> dict:
@@ -147,7 +200,7 @@ def get_live_price(symbol: str, exchange: str = "NSE") -> dict:
     ticker_sym = _resolve_ticker(symbol, exchange)
 
     try:
-        price, prev, open_, high, low, vol = _fetch_fast_info(ticker_sym)
+        price, prev, open_, high, low, vol = _fetch_ticker_price(ticker_sym)
 
         if price < 0.5 or price > 1_000_000:
             raise ValueError(f"Suspicious price {price}")
@@ -180,7 +233,7 @@ def get_index(symbol: str) -> dict:
         return {k: v for k, v in _cache[f"_idx_{symbol}"].items() if k != "_ts"}
 
     try:
-        price, prev = _fetch_index_fast_info(symbol)
+        price, prev = _fetch_index_price(symbol)
         chg = round(price - prev, 2)
         result = {
             "symbol":    symbol,
