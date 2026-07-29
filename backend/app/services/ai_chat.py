@@ -1,9 +1,12 @@
 import os
+import time
+import requests
 from groq import Groq
 from app.services.trade_engine import get_holdings, get_cash, get_orders
 from app.services.data_fetcher import get_live_price
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+MODEL = "llama-3.3-70b-versatile"
 
 SYSTEM_PROMPT = """You are DalalStreet AI — an expert Indian stock market assistant
 built for NSE and BSE traders.
@@ -24,6 +27,44 @@ Rules:
 - Always remind users this is a VIRTUAL DEMO — not real financial advice
 - Reference the user's actual portfolio and LIVE prices when relevant
 - NEVER use prices from memory — only use prices from the context below"""
+
+
+def _log_to_central_tracker(feature_name, prompt_tokens, completion_tokens,
+                             latency_ms, success, error_message=None):
+    """
+    Reports this Groq call to the shared cross-app usage dashboard (a
+    separate Convex project, llm-usage-tracker). Best-effort only — if the
+    tracker is unreachable or not configured, we print a warning and move
+    on rather than let it break an actual chat response.
+    """
+    url = os.getenv("USAGE_TRACKER_URL", "")
+    secret = os.getenv("USAGE_LOG_SECRET", "")
+
+    if not url or not secret:
+        return
+
+    try:
+        requests.post(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "x-usage-secret": secret,
+            },
+            json={
+                "appName": "dalal-street-ai",
+                "feature": feature_name,
+                "model": MODEL,
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+                "totalTokens": prompt_tokens + completion_tokens,
+                "latencyMs": latency_ms,
+                "success": success,
+                "errorMessage": error_message,
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"⚠️  Failed to log to central usage tracker: {e}")
 
 
 def _build_live_context() -> str:
@@ -94,8 +135,13 @@ def _build_live_context() -> str:
     return "\n".join(lines)
 
 
-def chat(message: str, history: list = []) -> str:
-    """Send message to Groq with injected live prices."""
+def chat(message: str, history: list = [], feature: str = "chat") -> str:
+    """Send message to Groq with injected live prices.
+
+    `feature` distinguishes regular chat from analyse_stock() calls (which
+    route through this same function) for the usage dashboard — pass an
+    explicit value from callers that aren't plain user chat.
+    """
     live_context = _build_live_context()
     system       = SYSTEM_PROMPT + live_context
 
@@ -105,15 +151,31 @@ def chat(message: str, history: list = []) -> str:
         {"role": "user",    "content": message},
     ]
 
+    start_time = time.time()
+
     try:
         resp = client.chat.completions.create(
-            model       = "llama-3.3-70b-versatile",
+            model       = MODEL,
             messages    = messages,
             max_tokens  = 512,
             temperature = 0.3,   # lower = more factual, less hallucination
         )
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        usage = getattr(resp, "usage", None)
+        prompt_tokens = usage.prompt_tokens if usage else 0
+        completion_tokens = usage.completion_tokens if usage else 0
+
+        _log_to_central_tracker(
+            feature, prompt_tokens, completion_tokens, latency_ms, success=True,
+        )
+
         return resp.choices[0].message.content
     except Exception as e:
+        latency_ms = int((time.time() - start_time) * 1000)
+        _log_to_central_tracker(
+            feature, 0, 0, latency_ms, success=False, error_message=str(e),
+        )
         return f"AI error: {str(e)}. Check your GROQ_API_KEY."
 
 
@@ -126,6 +188,6 @@ def analyse_stock(symbol: str) -> str:
             f"change is {live['changePct']:+.2f}% today. "
             f"Give a 3-sentence view."
         )
-        return chat(prompt)
+        return chat(prompt, feature="analyseStock")
     except Exception as e:
         return f"Could not analyse {symbol}: {e}"
