@@ -4,6 +4,7 @@ import { usePriceStore, StockPrice } from "@/stores/priceStore";
 import { useShallow } from "zustand/react/shallow";
 import { formatINR, formatChange, formatVolume } from "@/lib/formatters";
 import StockChartModal from "@/components/StockChartModal";
+import { usePriceStream } from "@/hooks/usePriceStream";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -195,14 +196,54 @@ function WatchTable({ children, empty }: {
 export default function Watchlist() {
   const pricesMap = usePriceStore(s => s.prices);
 
-  // Default watchlist symbols (from SSE stream)
-  const [defSymbols, setDefSymbols] = useState<string[]>([]);
+  // Default watchlist symbols (from SSE stream). Use cached fallback for fast loads
+  const [defSymbols, setDefSymbols] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("ds_default_watchlist") || "null");
+      if (Array.isArray(saved) && saved.length > 0) return saved;
+    } catch {}
+    return POPULAR_NSE.slice(0, 12);
+  });
+  const [loadingDefaults, setLoadingDefaults] = useState(false);
+
   useEffect(() => {
     const keys = Object.keys(pricesMap);
-    setDefSymbols(prev =>
-      keys.length !== prev.length || !keys.every((k, i) => k === prev[i]) ? keys : prev
-    );
+    if (keys.length > 0) {
+      setDefSymbols(prev => {
+        if (keys.length !== prev.length || !keys.every((k, i) => k === prev[i])) {
+          try { localStorage.setItem("ds_default_watchlist", JSON.stringify(keys)); } catch {}
+          return keys;
+        }
+        return prev;
+      });
+    }
   }, [pricesMap]);
+
+  // Kick off SSE for the default symbols so prices populate quickly when available
+  usePriceStream(defSymbols);
+
+  // If backend REST is available but SSE not yet connected, fetch a one-time snapshot for the default list
+  const updatePrices = usePriceStore(s => s.updatePrices);
+  useEffect(() => {
+    if (!defSymbols.length) return;
+    // If we already have any price for the defaults, no need to fetch
+    const hasData = defSymbols.some(sym => !!pricesMap[sym]);
+    if (hasData) return;
+    let alive = true;
+    async function fetchAll() {
+      try {
+        setLoadingDefaults(true);
+        const promises = defSymbols.map(s =>
+          fetch(`${API}/api/market/price/${s}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        );
+        const results = await Promise.all(promises);
+        const valid = results.filter(Boolean);
+        if (alive && valid.length) updatePrices(valid as any);
+      } catch {} finally { if (alive) setLoadingDefaults(false); }
+    }
+    fetchAll();
+    return () => { alive = false; };
+  }, [defSymbols.join(","), Object.keys(pricesMap).length, updatePrices]);
 
   // Active tab
   const [tab, setTab] = useState<"default" | "mine">("default");
@@ -334,10 +375,13 @@ export default function Watchlist() {
             />
             <button
               onClick={() => search.trim() && addStock(search)}
+              disabled={!search.trim()}
+              aria-disabled={!search.trim()}
               style={{
                 padding: "7px 14px", borderRadius: 6, border: "none",
-                cursor: "pointer", fontSize: 12, fontWeight: 700,
+                cursor: search.trim() ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 700,
                 fontFamily: "monospace", background: "#166534", color: "#86efac",
+                opacity: search.trim() ? 1 : 0.6,
               }}
             >+ Add</button>
           </div>
@@ -391,18 +435,25 @@ export default function Watchlist() {
 
       {/* ── Default watchlist ── */}
       {tab === "default" && (
-        defSymbols.length === 0 ? (
-          <div style={{ padding: "48px 16px", textAlign: "center",
-            color: "var(--color-muted)", fontSize: 13 }}>
-            Connecting to market data…
-          </div>
-        ) : (
-          <WatchTable>
-            {defSymbols.map(sym => (
-              <StoreRow key={sym} symbol={sym} onChart={setChartSymbol} />
-            ))}
-          </WatchTable>
-        )
+        <WatchTable>
+          {defSymbols.length === 0 ? (
+            <tr><td colSpan={6} style={{ padding: "48px 16px", textAlign: "center", color: "var(--color-muted)", fontSize: 13 }}>Connecting to market data…</td></tr>
+          ) : (
+            (Object.keys(pricesMap).length === 0 && loadingDefaults) ? (
+              defSymbols.slice(0, 6).map((s, i) => (
+                <tr key={`skel-${i}`} style={{ borderBottom: "1px solid var(--color-surface-border)" }}>
+                  <td colSpan={6} style={{ padding: "10px 16px", color: "#4b5563", fontFamily: "monospace" }}>
+                    Loading {s}…
+                  </td>
+                </tr>
+              ))
+            ) : (
+              defSymbols.map(sym => (
+                <StoreRow key={sym} symbol={sym} onChart={setChartSymbol} />
+              ))
+            )
+          )}
+        </WatchTable>
       )}
 
       {/* ── My watchlist ── */}
