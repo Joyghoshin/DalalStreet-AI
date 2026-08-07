@@ -92,30 +92,36 @@ export default function LoginPage() {
 
           <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
-              <label style={{
-                fontSize: 11, color: "#64748b", display: "block",
+              <label htmlFor="email" style={{
+                fontSize: 11, color: "#fefeff", display: "block",
                 marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em",
               }}>Email</label>
               <input
+                id="email"
+                name="email"
                 type="email" required
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="your@email.com"
                 style={inputStyle}
+                aria-label="Email"
               />
             </div>
 
             <div>
-              <label style={{
-                fontSize: 11, color: "#64748b", display: "block",
+              <label htmlFor="password" style={{
+                fontSize: 11, color: "#fefeff", display: "block",
                 marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em",
               }}>Password</label>
               <input
+                id="password"
+                name="password"
                 type="password" required
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••"
                 style={inputStyle}
+                aria-label="Password"
               />
             </div>
 
@@ -137,7 +143,7 @@ export default function LoginPage() {
 
           <div style={{
             marginTop: 20, paddingTop: 16, borderTop: "1px solid #1e293b",
-            fontSize: 11, color: "#334155", textAlign: "center", fontFamily: "monospace",
+            fontSize: 11, color: "#fefeff", textAlign: "center", fontFamily: "monospace",
           }}>
             Secured by NextAuth.js · Sessions expire in 7 days
           </div>
