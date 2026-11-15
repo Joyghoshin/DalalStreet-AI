@@ -4,6 +4,7 @@ import { usePriceStore, StockPrice } from "@/stores/priceStore";
 import { useShallow } from "zustand/react/shallow";
 import { formatINR, formatChange, formatVolume } from "@/lib/formatters";
 import StockChartModal from "@/components/StockChartModal";
+import { timedFetch } from "@/hooks/usePriceStream";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -137,7 +138,7 @@ function UserRow({ symbol, onRemove, onChart }: {
     let alive = true;
     async function fetch_() {
       try {
-        const d = await fetch(`${API}/api/market/price/${symbol}`).then(r => r.json());
+        const d = await timedFetch(`${API}/api/market/price/${symbol}`).then(r => r.json());
         if (alive && d?.price) setStock(d as StockPrice);
       } catch {}
     }

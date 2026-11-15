@@ -34,3 +34,16 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Request Timing (SCRUM-125)
+
+### Backend (FastAPI)
+Every HTTP response includes an `X-Process-Time` header with the request duration in milliseconds.
+Endpoints slower than 500 ms are logged at WARNING level to the console (e.g. `Slow endpoint: GET /api/market/quote/RELIANCE took 623ms`).
+
+### Frontend (Next.js)
+In development mode (`npm run dev`), each `fetch` call logs its duration to the browser console:
+```
+[fetch] http://localhost:8000/api/market/price/RELIANCE 142ms
+```
+This uses a small wrapper `timedFetch` (in `src/hooks/usePriceStream.ts`) that is a no-op in production.

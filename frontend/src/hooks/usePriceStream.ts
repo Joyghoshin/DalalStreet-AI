@@ -29,3 +29,17 @@ export function usePriceStream(symbols: string[]) {
     return () => es.close();
   }, [symbols.join(",")]);
 }
+
+// Development-only fetch timing helper
+export async function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (process.env.NODE_ENV !== "development") {
+    return fetch(input, init);
+  }
+  const start = performance.now();
+  try {
+    return await fetch(input, init);
+  } finally {
+    const duration = Math.round(performance.now() - start);
+    console.log(`[fetch] ${typeof input === "string" ? input : input.toString()} ${duration}ms`);
+  }
+}
