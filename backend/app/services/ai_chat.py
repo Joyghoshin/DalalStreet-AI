@@ -34,8 +34,8 @@ def _log_to_central_tracker(feature_name, prompt_tokens, completion_tokens,
     """
     Reports this Groq call to the shared cross-app usage dashboard (a
     separate Convex project, llm-usage-tracker). Best-effort only — if the
-    tracker is unreachable or not configured, we print a warning and move
-    on rather than let it break an actual chat response.
+    tracker is unreachable, misconfigured, or rejects the request, we print
+    a warning and move on rather than let it break an actual chat response.
     """
     url = os.getenv("USAGE_TRACKER_URL", "")
     secret = os.getenv("USAGE_LOG_SECRET", "")
@@ -44,8 +44,8 @@ def _log_to_central_tracker(feature_name, prompt_tokens, completion_tokens,
         return
 
     try:
-        requests.post(
-            url,
+        resp = requests.post(
+            f"{url}/logUsage",
             headers={
                 "Content-Type": "application/json",
                 "x-usage-secret": secret,
@@ -63,6 +63,8 @@ def _log_to_central_tracker(feature_name, prompt_tokens, completion_tokens,
             },
             timeout=5,
         )
+        if resp.status_code != 200:
+            print(f"⚠️  Usage tracker returned {resp.status_code}: {resp.text}")
     except Exception as e:
         print(f"⚠️  Failed to log to central usage tracker: {e}")
 
