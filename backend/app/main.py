@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+import time
+import logging
+
 from app.routers import market, portfolio, chat
 from app.routers import backtest_router
 from app.routers import chart_router
@@ -17,6 +20,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time_ms = int((time.perf_counter() - start_time) * 1000)
+    response.headers["X-Process-Time"] = str(process_time_ms)
+    if process_time_ms > 500:
+        logging.warning(f"Slow endpoint: {request.method} {request.url.path} took {process_time_ms}ms")
+    return response
 
 app.include_router(market.router,          prefix="/api/market",    tags=["Market"])
 app.include_router(portfolio.router,       prefix="/api/portfolio", tags=["Portfolio"])
